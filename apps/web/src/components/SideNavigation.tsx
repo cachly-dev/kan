@@ -130,6 +130,19 @@ export default function SideNavigation({
       },
     },
     {
+      // cachly: Mothership-Puls (Ereignisstrom) direkt im Board
+      name: t`Puls`,
+      href: "/puls",
+      icon: isDarkMode ? templatesIconDark : templatesIconLight,
+      keyboardShortcut: {
+        type: "SEQUENCE",
+        strokes: [{ key: "G" }, { key: "P" }],
+        action: () => router.push("/puls"),
+        group: "NAVIGATION",
+        description: t`Go to puls`,
+      },
+    },
+    {
       name: t`Settings`,
       href: "/settings",
       icon: isDarkMode ? settingsIconDark : settingsIconLight,
