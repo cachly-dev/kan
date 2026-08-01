@@ -355,6 +355,19 @@ export default function CardPage({ isTemplate }: { isTemplate?: boolean }) {
                   )}
               </div>
               <div className="flex items-center gap-2">
+                {/* cachly/Mothership: Kontext am Ort der Arbeit — zeigt den Fall
+                    zu dieser Karte (Verlauf über alle Systeme + gelerntes Wissen). */}
+                {!isTemplate && (
+                  <a
+                    href={`/api/mothership/faelle#card=${cardId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Was ist mit dieser Karte passiert? (Mothership)"
+                    className="whitespace-nowrap rounded-[5px] border border-light-300 px-2 py-[2px] text-xs font-medium text-light-900 hover:bg-light-100 dark:border-dark-300 dark:text-dark-900 dark:hover:bg-dark-100"
+                  >
+                    Was ist hier passiert?
+                  </a>
+                )}
                 <Dropdown
                   cardPublicId={cardId}
                   isTemplate={isTemplate}
