@@ -19,6 +19,10 @@ export const webhookEvents = [
   "card.updated",
   "card.moved",
   "card.deleted",
+  // cachly-Erweiterung: Kommentare + Anhaenge als Webhook-Events
+  // (upstream feuert nur die vier card.*-Events).
+  "card.commented",
+  "card.attachment.added",
 ] as const;
 export type WebhookEvent = (typeof webhookEvents)[number];
 
