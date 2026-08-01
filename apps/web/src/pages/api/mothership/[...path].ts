@@ -20,6 +20,7 @@ const ALLOWED: Record<string, string> = {
   "puls/data": "/puls/data",
   "puls/ask": "/puls/ask",
   "puls/insights": "/puls/insights",
+  "puls/action": "/puls/action",
   wissen: "/wissen",
   "wissen/data": "/wissen/data",
 };
