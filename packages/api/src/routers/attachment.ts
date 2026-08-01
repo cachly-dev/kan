@@ -8,6 +8,10 @@ import * as workspaceRepo from "@kan/db/repository/workspace.repo";
 import { generateUID } from "@kan/shared/utils";
 
 import { createTRPCRouter, protectedProcedure } from "../trpc";
+import {
+  createCardWebhookPayload,
+  sendWebhooksForWorkspace,
+} from "../utils/webhook";
 import { attachmentConfirmResponseSchema } from "../schemas";
 import { assertPermission } from "../utils/permissions";
 import { deleteObject, generateUploadUrl } from "@kan/shared/utils";
@@ -156,6 +160,34 @@ export const attachmentRouter = createTRPCRouter({
         attachmentId: attachment.id,
         toTitle: input.originalFilename,
         createdBy: userId,
+      });
+
+      // cachly: Anhaenge als Webhook-Event (non-blocking)
+      sendWebhooksForWorkspace(
+        ctx.db,
+        card.workspaceId,
+        createCardWebhookPayload(
+          "card.attachment.added",
+          {
+            id: String(card.id),
+            publicId: input.cardPublicId,
+            title: card.title,
+            listId: card.listPublicId,
+          },
+          {
+            boardId: card.boardPublicId,
+            boardName: card.boardName,
+            listName: card.listName,
+            user: ctx.user
+              ? { id: ctx.user.id, name: ctx.user.name }
+              : undefined,
+            changes: {
+              attachment: { from: null, to: input.originalFilename },
+            },
+          },
+        ),
+      ).catch((error) => {
+        console.error("Failed to send card.attachment.added webhooks:", error);
       });
 
       return attachment;
