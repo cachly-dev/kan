@@ -287,6 +287,34 @@ export const cardRouter = createTRPCRouter({
         console.error("Failed to send mention emails:", error);
       });
 
+      // cachly: Kommentare als Webhook-Event (non-blocking)
+      sendWebhooksForWorkspace(
+        ctx.db,
+        card.workspaceId,
+        createCardWebhookPayload(
+          "card.commented",
+          {
+            id: String(card.id),
+            publicId: input.cardPublicId,
+            title: card.title,
+            listId: card.listPublicId,
+          },
+          {
+            boardId: card.boardPublicId,
+            boardName: card.boardName,
+            listName: card.listName,
+            user: ctx.user
+              ? { id: ctx.user.id, name: ctx.user.name }
+              : undefined,
+            changes: {
+              comment: { from: null, to: input.comment.slice(0, 200) },
+            },
+          },
+        ),
+      ).catch((error) => {
+        console.error("Failed to send card.commented webhooks:", error);
+      });
+
       return newComment;
     }),
   updateComment: protectedProcedure
