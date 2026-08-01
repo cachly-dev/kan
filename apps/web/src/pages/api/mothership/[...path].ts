@@ -21,6 +21,8 @@ const ALLOWED: Record<string, string> = {
   "puls/ask": "/puls/ask",
   "puls/insights": "/puls/insights",
   "puls/action": "/puls/action",
+  faelle: "/faelle",
+  "faelle/data": "/faelle/data",
   wissen: "/wissen",
   "wissen/data": "/wissen/data",
 };
