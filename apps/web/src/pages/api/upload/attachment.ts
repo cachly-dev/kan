@@ -5,6 +5,10 @@ import { createNextApiContext } from "@kan/api/trpc";
 import { withApiLogging } from "@kan/api/utils/apiLogging";
 import { assertPermission } from "@kan/api/utils/permissions";
 import { withRateLimit } from "@kan/api/utils/rateLimit";
+import {
+  createCardWebhookPayload,
+  sendWebhooksForWorkspace,
+} from "@kan/api/utils/webhook";
 import * as cardRepo from "@kan/db/repository/card.repo";
 import * as cardActivityRepo from "@kan/db/repository/cardActivity.repo";
 import * as cardAttachmentRepo from "@kan/db/repository/cardAttachment.repo";
@@ -137,6 +141,34 @@ export default withRateLimit(
         attachmentId: attachment.id,
         toTitle: originalFilenameHeader,
         createdBy: user.id,
+      });
+
+      // cachly: Webhook-Paritaet mit dem tRPC-confirm-Pfad — dieser Endpoint
+      // ist der Weg der Web-UI; ohne das Event sieht der Mothership-
+      // Transkriptions-Worker keine UI-Uploads. (non-blocking)
+      sendWebhooksForWorkspace(
+        db,
+        card.workspaceId,
+        createCardWebhookPayload(
+          "card.attachment.added",
+          {
+            id: String(card.id),
+            publicId: cardPublicId,
+            title: card.title,
+            listId: card.listPublicId,
+          },
+          {
+            boardId: card.boardPublicId,
+            boardName: card.boardName,
+            listName: card.listName,
+            user: { id: user.id, name: user.name },
+            changes: {
+              attachment: { from: null, to: originalFilenameHeader },
+            },
+          },
+        ),
+      ).catch((error) => {
+        console.error("Failed to send card.attachment.added webhooks:", error);
       });
 
       return res.status(200).json({ attachment });
