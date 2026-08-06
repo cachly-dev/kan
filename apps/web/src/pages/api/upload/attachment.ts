@@ -167,7 +167,7 @@ export default withRateLimit(
             },
           },
         ),
-      ).catch((error) => {
+      ).catch((error: unknown) => {
         console.error("Failed to send card.attachment.added webhooks:", error);
       });
 
