@@ -1,0 +1,114 @@
+# Kan-Fork CD (cachly) — gleiche Mechanik wie die fuenf App-Repos:
+# Build auf dem self-hosted Org-Runner, Push in die interne Registry,
+# Deploy nach node-1 durch den restricted Deploy-Channel
+# (deploy-User, sudo-Whitelist = /opt/kan/ci-deploy.sh, siehe kan-deploy-Repo).
+#
+# Bis 2026-08-06 wurde das Kan-Image MANUELL auf node-1 gebaut und als
+# datiertes Tag gepinnt (kan-deploy README) — dieser Workflow ersetzt das:
+# Merge auf cachly-patches = Build + Deploy. Upstream-Workflows
+# (docker-publish.yml, translate.yml) bleiben unberuehrt und feuern hier nicht
+# (sie haengen an main/Tags).
+#
+# Benoetigte Repo-Secrets (NICHT org-weit vorhanden, einmalig setzen):
+#   REGISTRY_PASSWORD  — docker login registry.cachly.dev als User cachly
+#   DEPLOY_CHANNEL_KEY — SSH-Key des deploy-Users fuer node-1 (Port 2222)
+name: Cachly Deploy
+
+on:
+  push:
+    branches: [cachly-patches]
+  # PRs pruefen, aber niemals ausliefern (if-Bedingung am Deploy-Job).
+  pull_request:
+    branches: [cachly-patches]
+  workflow_dispatch:
+
+concurrency:
+  group: cachly-deploy
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Typecheck
+    runs-on: [self-hosted, apps]
+    steps:
+      - uses: actions/checkout@v4
+      # Keine explizite Version: package.json packageManager (pnpm@9.14.2)
+      # ist die einzige Quelle — doppelte Angabe ist bei pnpm/action-setup
+      # ein Fehler ("Multiple versions of pnpm specified").
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      # next-env.d.ts ist gitignored (generiert sonst erst next build).
+      # Ohne sie wirft tsc TS2307 auf allen *.svg-Imports (Logos.tsx).
+      - name: next-env.d.ts bereitstellen
+        run: |
+          printf '/// <reference types="next" />\n/// <reference types="next/image-types/global" />\n' > apps/web/next-env.d.ts
+      - run: pnpm --filter @kan/web run typecheck
+
+  build-and-deploy:
+    name: Build → Registry → node-1
+    needs: [checks]
+    # Ein Pull Request darf pruefen, aber niemals ausliefern.
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, apps]
+    env:
+      REGISTRY: registry.cachly.dev
+      SSH_OPTS: -i /tmp/deploy_key_kan -p 2222 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Registry login
+        run: printf '%s' "${{ secrets.REGISTRY_PASSWORD }}" | docker login "$REGISTRY" -u cachly --password-stdin
+
+      # Platz schaffen, BEVOR gebaut wird — der Node ist mit den anderen
+      # App-Builds geteilt; ein volllaufender Build toetet den Runner ohne
+      # Meldung an GitHub (Zombie-Job, Incident 2026-07-26 bei stayledger).
+      - name: Platz pruefen (CI-Node)
+        run: |
+          free_gb() { df --output=avail -BG / | tail -1 | tr -dc '0-9'; }
+          echo "Frei vor dem Build: $(free_gb) GB"
+          if [ "$(free_gb)" -lt 20 ]; then
+            docker image prune -a --filter "until=48h" -f || true
+            docker builder prune -f --keep-storage 4GB || true
+            echo "Frei nach dem Aufraeumen: $(free_gb) GB"
+          fi
+          if [ "$(free_gb)" -lt 10 ]; then
+            echo "::error::Nur noch $(free_gb) GB frei auf dem CI-Node — Build abgebrochen."
+            exit 1
+          fi
+
+      - name: Build image
+        run: docker build -f apps/web/Dockerfile -t "$REGISTRY/kan:latest" -t "$REGISTRY/kan:sha-${{ github.sha }}" .
+
+      - name: Push image
+        run: |
+          docker push "$REGISTRY/kan:latest"
+          docker push "$REGISTRY/kan:sha-${{ github.sha }}"
+
+      - name: Deploy via restricted channel
+        env:
+          DEPLOY_CHANNEL_KEY: ${{ secrets.DEPLOY_CHANNEL_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$DEPLOY_CHANNEL_KEY" > /tmp/deploy_key_kan
+          ssh $SSH_OPTS deploy@10.8.0.1 "sudo bash /opt/kan/ci-deploy.sh"
+          rm -f /tmp/deploy_key_kan
+
+      - name: Smoke test (public)
+        run: |
+          curl -sf --retry 5 --retry-delay 5 --max-time 15 https://kan.cachly.dev/api/health >/dev/null
+          echo "deployed & healthy"
+
+      # sha-Tags lokal enttaggen (Registry behaelt sie, Rollback unberuehrt),
+      # sonst frisst jeder Lauf ~2 GB auf dem geteilten CI-Node.
+      - name: Runner-Disk aufraeumen
+        if: always()
+        run: |
+          docker images "$REGISTRY/kan" --format '{{.Repository}}:{{.Tag}}' \
+            | grep ':sha-' | grep -v "sha-${GITHUB_SHA}" \
+            | xargs -r docker rmi 2>/dev/null || true
+          docker image prune -f || true
+          docker builder prune -f --keep-storage 4GB 2>/dev/null || true
+          df -h / | tail -1
