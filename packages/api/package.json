@@ -39,6 +39,10 @@
     "./utils/workspace": {
       "types": "./src/utils/workspace.ts",
       "default": "./src/utils/workspace.ts"
+    },
+    "./utils/webhook": {
+      "types": "./src/utils/webhook.ts",
+      "default": "./src/utils/webhook.ts"
     }
   },
   "license": "GPL-3.0",

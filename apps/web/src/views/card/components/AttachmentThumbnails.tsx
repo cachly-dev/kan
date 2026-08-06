@@ -41,10 +41,21 @@ export function AttachmentThumbnails({
         attachment.contentType.startsWith("image/") && attachment.url,
     ) ?? [];
 
+  const mediaAttachments =
+    attachments?.filter(
+      (attachment) =>
+        (attachment.contentType.startsWith("video/") ||
+          attachment.contentType.startsWith("audio/")) &&
+        attachment.url,
+    ) ?? [];
+
   const nonImageAttachments =
     attachments?.filter(
       (attachment) =>
-        !attachment.contentType.startsWith("image/") && attachment.url,
+        !attachment.contentType.startsWith("image/") &&
+        !attachment.contentType.startsWith("video/") &&
+        !attachment.contentType.startsWith("audio/") &&
+        attachment.url,
     ) ?? [];
 
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -110,7 +121,11 @@ export function AttachmentThumbnails({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectedIndex, imageAttachments.length]);
 
-  if (imageAttachments.length === 0 && nonImageAttachments.length === 0) {
+  if (
+    imageAttachments.length === 0 &&
+    mediaAttachments.length === 0 &&
+    nonImageAttachments.length === 0
+  ) {
     return null;
   }
 
@@ -178,6 +193,30 @@ export function AttachmentThumbnails({
           );
         })}
       </div>
+
+      {mediaAttachments.length > 0 && (
+        <div className="mb-3 flex flex-col gap-2">
+          {mediaAttachments.map((attachment) => {
+            if (!attachment.url) return null;
+            return (
+              <MediaPlayerItem
+                key={attachment.publicId}
+                attachment={attachment}
+                onDownload={() => handleDownload(attachment)}
+                onDelete={
+                  isReadOnly
+                    ? undefined
+                    : () => {
+                        deleteAttachment.mutate({
+                          attachmentPublicId: attachment.publicId,
+                        });
+                      }
+                }
+              />
+            );
+          })}
+        </div>
+      )}
 
       {nonImageAttachments.length > 0 && (
         <div className="mb-3 flex flex-col gap-2">
@@ -399,6 +438,70 @@ function AttachmentThumbnail({
         </div>
       )}
     </button>
+  );
+}
+
+function MediaPlayerItem({
+  attachment,
+  onDownload,
+  onDelete,
+}: {
+  attachment: Attachment;
+  onDownload: () => void;
+  onDelete?: () => void;
+}) {
+  if (!attachment.url) return null;
+  const isVideo = attachment.contentType.startsWith("video/");
+
+  return (
+    <div className="group w-full rounded-lg border border-light-300 bg-light-50 p-2 dark:border-dark-200 dark:bg-dark-100">
+      <div className="mb-1 flex items-center gap-2">
+        <div className="min-w-0 flex-1 truncate text-sm text-light-1000 dark:text-dark-1000">
+          {attachment.originalFilename ?? "Recording"}
+        </div>
+        <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="text-xs text-light-500 dark:text-dark-900">
+            {attachment.size != null &&
+              !isNaN(attachment.size) &&
+              `${formatFileSize(attachment.size)}`}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDownload();
+              }}
+              className="flex-shrink-0 rounded-full bg-light-100 p-1.5 text-light-1000 transition-colors hover:bg-light-200 focus:outline-none dark:bg-dark-100 dark:text-dark-950 dark:hover:bg-dark-300"
+              aria-label={`Download ${attachment.originalFilename}`}
+            >
+              <HiArrowDownTray className="h-4 w-4" />
+            </button>
+            {onDelete && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+                className="flex-shrink-0 rounded-full bg-light-100 p-1.5 text-light-1000 transition-colors hover:bg-light-200 focus:outline-none dark:bg-dark-100 dark:text-dark-950 dark:hover:bg-dark-300"
+                aria-label={`Delete ${attachment.originalFilename}`}
+              >
+                <HiXMark className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+      {isVideo ? (
+        <video
+          controls
+          preload="metadata"
+          src={attachment.url}
+          className="max-h-72 w-full rounded-md bg-black"
+        />
+      ) : (
+        <audio controls preload="metadata" src={attachment.url} className="w-full" />
+      )}
+    </div>
   );
 }
 
