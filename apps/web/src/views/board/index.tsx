@@ -582,11 +582,15 @@ export default function BoardPage({ isTemplate }: { isTemplate?: boolean }) {
                   workspaceSlug={workspace.slug ?? ""}
                   boardSlug={boardData?.slug ?? ""}
                   boardPublicId={boardId ?? ""}
-                  visibility={boardData?.visibility ?? "private"}
+                  visibility={
+                    boardData?.visibility === "public" ? "public" : "private"
+                  }
                   canEdit={canEditBoard}
                 />
                 <VisibilityButton
-                  visibility={boardData?.visibility ?? "private"}
+                  visibility={
+                    boardData?.visibility === "public" ? "public" : "private"
+                  }
                   boardPublicId={boardId ?? ""}
                   boardSlug={boardData?.slug ?? ""}
                   queryParams={queryParams}
