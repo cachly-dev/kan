@@ -257,6 +257,8 @@ export const getByPublicId = async (
               index: true,
               dueDate: true,
               cardNumber: true,
+              createdAt: true,
+              updatedAt: true,
             },
             with: {
               labels: {

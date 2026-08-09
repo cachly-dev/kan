@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { dbClient } from "@kan/db/client";
 import type { WebhookEvent } from "@kan/db/schema";
 import * as webhookRepo from "@kan/db/repository/webhook.repo";
+import * as workspaceRepo from "@kan/db/repository/workspace.repo";
 import { createLogger } from "@kan/logger";
 
 const log = createLogger("webhook");
@@ -34,6 +35,11 @@ export interface WebhookPayload {
     user?: {
       id: string;
       name: string | null;
+    };
+    workspace?: {
+      publicId: string;
+      slug: string;
+      name: string;
     };
     changes?: Record<string, { from: unknown; to: unknown }>;
   };
@@ -197,10 +203,36 @@ export async function sendWebhooksForWorkspace(
     const webhooksForEvent = allWebhooks.filter((w) =>
       w.events.includes(payload.event),
     );
+    if (webhooksForEvent.length === 0) return;
+
+    // Enrich payload with workspace identity so receivers can attribute
+    // events without an out-of-band hint (e.g. a query parameter per hook).
+    // Best effort: delivery must never fail because of the lookup.
+    let enrichedPayload = payload;
+    if (!payload.data.workspace) {
+      try {
+        const workspace = await workspaceRepo.getById(db, workspaceId);
+        if (workspace) {
+          enrichedPayload = {
+            ...payload,
+            data: {
+              ...payload.data,
+              workspace: {
+                publicId: workspace.publicId,
+                slug: workspace.slug,
+                name: workspace.name,
+              },
+            },
+          };
+        }
+      } catch (error) {
+        log.error({ err: error, workspaceId }, "Workspace lookup for webhook payload failed");
+      }
+    }
 
     // Send to all subscribed webhooks in parallel (fire and forget)
     const promises = webhooksForEvent.map((webhook) =>
-      sendWebhookToUrl(webhook.url, webhook.secret ?? undefined, payload).then(
+      sendWebhookToUrl(webhook.url, webhook.secret ?? undefined, enrichedPayload).then(
         (result) => {
           if (!result.success) {
             log.error({ url: webhook.url, event: payload.event, error: result.error, statusCode: result.statusCode }, "Webhook delivery failed");

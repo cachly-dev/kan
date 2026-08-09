@@ -11,11 +11,16 @@ vi.mock("@kan/db/repository/webhook.repo", () => ({
   getActiveByWorkspaceId: vi.fn(),
 }));
 
+vi.mock("@kan/db/repository/workspace.repo", () => ({
+  getById: vi.fn(),
+}));
+
 vi.mock("@kan/logger", () => ({
   createLogger: vi.fn(() => mockLogger),
 }));
 
 import * as webhookRepo from "@kan/db/repository/webhook.repo";
+import * as workspaceRepo from "@kan/db/repository/workspace.repo";
 import {
   sendWebhookToUrl,
   sendWebhooksForWorkspace,
@@ -25,6 +30,7 @@ import {
 } from "./webhook";
 
 const mockGetActiveByWorkspaceId = webhookRepo.getActiveByWorkspaceId as ReturnType<typeof vi.fn>;
+const mockGetWorkspaceById = workspaceRepo.getById as unknown as ReturnType<typeof vi.fn>;
 
 describe("webhook utilities", () => {
   beforeEach(() => {
@@ -467,6 +473,46 @@ describe("webhook utilities", () => {
         "https://example.com/webhook2",
         expect.any(Object),
       );
+    });
+
+    it("enriches the delivered payload with workspace identity", async () => {
+      mockGetActiveByWorkspaceId.mockResolvedValueOnce([
+        {
+          id: 1,
+          publicId: "wh-1",
+          url: "https://example.com/webhook1",
+          secret: null,
+          events: ["card.created"],
+          active: true,
+        },
+      ]);
+      mockGetWorkspaceById.mockResolvedValueOnce({
+        id: 1,
+        publicId: "ws-pub-1",
+        name: "Acme",
+        slug: "acme",
+        plan: "free",
+      });
+
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        status: 200,
+      });
+
+      await sendWebhooksForWorkspace(mockDb, 1, mockPayload);
+
+      expect(mockGetWorkspaceById).toHaveBeenCalledWith(mockDb, 1);
+      const fetchMock = global.fetch as ReturnType<typeof vi.fn>;
+      const body = JSON.parse(
+        (fetchMock.mock.calls[0]?.[1] as { body: string }).body,
+      ) as WebhookPayload;
+      expect(body.data.workspace).toEqual({
+        publicId: "ws-pub-1",
+        slug: "acme",
+        name: "Acme",
+      });
+      // The caller's payload object must stay untouched
+      expect(mockPayload.data.workspace).toBeUndefined();
     });
 
     it("does not send when no webhooks match the event (client-side filtering)", async () => {
