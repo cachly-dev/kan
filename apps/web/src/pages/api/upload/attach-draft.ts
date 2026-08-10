@@ -9,6 +9,7 @@ import {
   assertKeyBelongsToTarget,
   createAttachmentRecord,
   DRAFT_PREFIX,
+  failRequest,
   getBucket,
   readJsonBody,
   resolveTarget,
@@ -29,7 +30,7 @@ export default withRateLimit(
   { points: 100, duration: 60 },
   withApiLogging(async (req: NextApiRequest, res: NextApiResponse) => {
     if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
+      return failRequest(req, res, 405, "Method not allowed");
     }
 
     try {
@@ -44,7 +45,7 @@ export default withRateLimit(
         typeof body.key !== "string" ||
         typeof body.cardPublicId !== "string"
       ) {
-        return res.status(400).json({ error: "Missing key or cardPublicId" });
+        return failRequest(req, res, 400, "Missing key or cardPublicId");
       }
 
       const { db, target, user } = await resolveTarget(req, {
@@ -53,10 +54,10 @@ export default withRateLimit(
       assertKeyBelongsToTarget(body.key, target.workspaceId);
 
       if (!body.key.startsWith(`${target.workspaceId}/${DRAFT_PREFIX}/`)) {
-        return res.status(400).json({ error: "Not a draft key" });
+        return failRequest(req, res, 400, "Not a draft key");
       }
       if (!target.card) {
-        return res.status(404).json({ error: "Card not found" });
+        return failRequest(req, res, 404, "Card not found");
       }
 
       // The object has to exist before a row claims it, otherwise the card
@@ -83,10 +84,10 @@ export default withRateLimit(
       return res.status(200).json({ attachment });
     } catch (error) {
       if (error instanceof UploadError) {
-        return res.status(error.status).json({ error: error.message });
+        return failRequest(req, res, error.status, error.message);
       }
       console.error("attach-draft failed:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      return failRequest(req, res, 500, "Internal server error");
     }
   }),
 );

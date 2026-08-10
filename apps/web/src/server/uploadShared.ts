@@ -1,4 +1,4 @@
-import type { NextApiRequest } from "next";
+import type { NextApiRequest, NextApiResponse } from "next";
 
 import { createNextApiContext } from "@kan/api/trpc";
 import { assertPermission } from "@kan/api/utils/permissions";
@@ -132,6 +132,26 @@ export const assertKeyBelongsToTarget = (key: string, workspaceId: number) => {
   // Path traversal would let a key escape the workspace prefix after
   // normalisation on the storage side.
   if (key.includes("..")) throw new UploadError(400, "Invalid key");
+};
+
+/**
+ * Answers with an error — and throws the request body away first.
+ *
+ * A handler that returns before reading the body leaves those bytes sitting in
+ * the socket. On a keep-alive connection the next request over the same socket
+ * gets them prepended. That is not theory: the screen recording from
+ * 2026-08-10 was stored at exactly the right size with 16438 bytes of an
+ * earlier upload in front of its EBML header, so no decoder could read it —
+ * the file looked fine in every listing and was silently worthless.
+ */
+export const failRequest = (
+  req: NextApiRequest,
+  res: NextApiResponse,
+  status: number,
+  message: string,
+) => {
+  req.resume();
+  return res.status(status).json({ error: message });
 };
 
 export const sanitizeFilename = (raw: string) =>

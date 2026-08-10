@@ -8,6 +8,7 @@ import { createS3Client } from "@kan/shared/utils";
 import {
   assertKeyBelongsToTarget,
   createAttachmentRecord,
+  failRequest,
   getBucket,
   MAX_TOTAL_BYTES,
   readJsonBody,
@@ -38,7 +39,7 @@ export default withRateLimit(
   { points: 100, duration: 60 },
   withApiLogging(async (req: NextApiRequest, res: NextApiResponse) => {
     if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
+      return failRequest(req, res, 405, "Method not allowed");
     }
 
     try {
@@ -46,18 +47,18 @@ export default withRateLimit(
       const { key, uploadId, parts, cardPublicId, boardPublicId } = body;
 
       if (typeof key !== "string" || typeof uploadId !== "string") {
-        return res.status(400).json({ error: "Missing key or uploadId" });
+        return failRequest(req, res, 400, "Missing key or uploadId");
       }
       if (!Array.isArray(parts) || parts.length === 0) {
-        return res.status(400).json({ error: "No parts to complete" });
+        return failRequest(req, res, 400, "No parts to complete");
       }
 
       const size = Number(body.size);
       if (!Number.isFinite(size) || size <= 0) {
-        return res.status(400).json({ error: "Invalid size" });
+        return failRequest(req, res, 400, "Invalid size");
       }
       if (size > MAX_TOTAL_BYTES) {
-        return res.status(413).json({ error: "Upload exceeds the size limit" });
+        return failRequest(req, res, 413, "Upload exceeds the size limit");
       }
 
       const { db, target, user } = await resolveTarget(req, {
@@ -78,7 +79,7 @@ export default withRateLimit(
         .sort((a, b) => a.PartNumber - b.PartNumber);
 
       if (completedParts.length !== parts.length) {
-        return res.status(400).json({ error: "Invalid part list" });
+        return failRequest(req, res, 400, "Invalid part list");
       }
 
       const client = createS3Client();
@@ -120,10 +121,10 @@ export default withRateLimit(
       return res.status(200).json({ attachment, key });
     } catch (error) {
       if (error instanceof UploadError) {
-        return res.status(error.status).json({ error: error.message });
+        return failRequest(req, res, error.status, error.message);
       }
       console.error("chunked upload finish failed:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      return failRequest(req, res, 500, "Internal server error");
     }
   }),
 );

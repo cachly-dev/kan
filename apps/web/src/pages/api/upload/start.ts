@@ -7,6 +7,7 @@ import { createS3Client, generateUID } from "@kan/shared/utils";
 
 import {
   DRAFT_PREFIX,
+  failRequest,
   getBucket,
   readJsonBody,
   resolveTarget,
@@ -24,7 +25,7 @@ export default withRateLimit(
   { points: 100, duration: 60 },
   withApiLogging(async (req: NextApiRequest, res: NextApiResponse) => {
     if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
+      return failRequest(req, res, 405, "Method not allowed");
     }
 
     try {
@@ -59,9 +60,12 @@ export default withRateLimit(
       );
 
       if (!created.UploadId) {
-        return res
-          .status(500)
-          .json({ error: "Storage did not return an upload id" });
+        return failRequest(
+          req,
+          res,
+          500,
+          "Storage did not return an upload id",
+        );
       }
 
       return res.status(200).json({
@@ -73,10 +77,10 @@ export default withRateLimit(
       });
     } catch (error) {
       if (error instanceof UploadError) {
-        return res.status(error.status).json({ error: error.message });
+        return failRequest(req, res, error.status, error.message);
       }
       console.error("chunked upload start failed:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      return failRequest(req, res, 500, "Internal server error");
     }
   }),
 );

@@ -7,6 +7,7 @@ import { createS3Client } from "@kan/shared/utils";
 
 import {
   assertKeyBelongsToTarget,
+  failRequest,
   getBucket,
   MAX_PART_BYTES,
   readBinaryBody,
@@ -29,7 +30,7 @@ export default withRateLimit(
   { points: 600, duration: 60 },
   withApiLogging(async (req: NextApiRequest, res: NextApiResponse) => {
     if (req.method !== "PUT" && req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
+      return failRequest(req, res, 405, "Method not allowed");
     }
 
     try {
@@ -40,14 +41,14 @@ export default withRateLimit(
       const boardPublicId = req.query.boardPublicId;
 
       if (typeof key !== "string" || typeof uploadId !== "string") {
-        return res.status(400).json({ error: "Missing key or uploadId" });
+        return failRequest(req, res, 400, "Missing key or uploadId");
       }
       if (
         !Number.isInteger(partNumber) ||
         partNumber < 1 ||
         partNumber > 10000
       ) {
-        return res.status(400).json({ error: "Invalid part number" });
+        return failRequest(req, res, 400, "Invalid part number");
       }
 
       const { target } = await resolveTarget(req, {
@@ -60,7 +61,7 @@ export default withRateLimit(
 
       const body = await readBinaryBody(req, MAX_PART_BYTES);
       if (body.length === 0) {
-        return res.status(400).json({ error: "Empty part" });
+        return failRequest(req, res, 400, "Empty part");
       }
 
       const client = createS3Client();
@@ -78,10 +79,10 @@ export default withRateLimit(
       return res.status(200).json({ partNumber, etag: uploaded.ETag });
     } catch (error) {
       if (error instanceof UploadError) {
-        return res.status(error.status).json({ error: error.message });
+        return failRequest(req, res, error.status, error.message);
       }
       console.error("chunked upload part failed:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      return failRequest(req, res, 500, "Internal server error");
     }
   }),
 );

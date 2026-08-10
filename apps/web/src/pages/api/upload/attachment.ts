@@ -15,7 +15,12 @@ import * as cardAttachmentRepo from "@kan/db/repository/cardAttachment.repo";
 import { createS3Client, generateUID } from "@kan/shared/utils";
 
 import { env } from "~/env";
+import { failRequest } from "~/server/uploadShared";
 
+// cachly: Every early exit here drains the request body first (failRequest).
+// Without that, an aborted upload leaves its bytes in the socket and keep-alive
+// prepends them to the NEXT upload — that is how a screen recording ended up
+// with 16438 bytes of junk before its EBML header on 2026-08-10.
 // FIXME: Respect the environment variable: NEXT_API_BODY_SIZE_LIMIT
 const MAX_SIZE_BYTES = 50 * 1024 * 1024; // 50MB
 
@@ -29,26 +34,24 @@ export default withRateLimit(
   { points: 100, duration: 60 },
   withApiLogging(async (req: NextApiRequest, res: NextApiResponse) => {
     if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
+      return failRequest(req, res, 405, "Method not allowed");
     }
 
     try {
       const { user, db } = await createNextApiContext(req);
 
       if (!user) {
-        return res.status(401).json({ error: "Unauthorized" });
+        return failRequest(req, res, 401, "Unauthorized");
       }
 
       const bucket = env.NEXT_PUBLIC_ATTACHMENTS_BUCKET_NAME;
       if (!bucket) {
-        return res
-          .status(500)
-          .json({ error: "Attachments bucket not configured" });
+        return failRequest(req, res, 500, "Attachments bucket not configured");
       }
 
       const cardPublicId = req.query.cardPublicId;
       if (typeof cardPublicId !== "string" || cardPublicId.length < 12) {
-        return res.status(400).json({ error: "Invalid cardPublicId" });
+        return failRequest(req, res, 400, "Invalid cardPublicId");
       }
 
       const contentType = req.headers["content-type"];
@@ -58,17 +61,15 @@ export default withRateLimit(
         : NaN;
 
       if (typeof contentType !== "string") {
-        return res.status(400).json({ error: "Missing content type" });
+        return failRequest(req, res, 400, "Missing content type");
       }
 
       if (!Number.isFinite(contentLength) || contentLength <= 0) {
-        return res
-          .status(400)
-          .json({ error: "Missing or invalid content length" });
+        return failRequest(req, res, 400, "Missing or invalid content length");
       }
 
       if (contentLength > MAX_SIZE_BYTES) {
-        return res.status(400).json({ error: "File too large" });
+        return failRequest(req, res, 400, "File too large");
       }
 
       const rawFilenameHeader =
@@ -92,14 +93,14 @@ export default withRateLimit(
       );
 
       if (!card) {
-        return res.status(404).json({ error: "Card not found" });
+        return failRequest(req, res, 404, "Card not found");
       }
 
       // Check if user has permission to edit the card
       try {
         await assertPermission(db, user.id, card.workspaceId, "card:edit");
       } catch {
-        return res.status(403).json({ error: "Permission denied" });
+        return failRequest(req, res, 403, "Permission denied");
       }
 
       const s3Key = `${card.workspaceId}/${cardPublicId}/${generateUID()}-${sanitizedFilename}`;
@@ -132,7 +133,7 @@ export default withRateLimit(
       });
 
       if (!attachment) {
-        return res.status(500).json({ error: "Failed to create attachment" });
+        return failRequest(req, res, 500, "Failed to create attachment");
       }
 
       await cardActivityRepo.create(db, {
@@ -173,7 +174,7 @@ export default withRateLimit(
 
       return res.status(200).json({ attachment });
     } catch (error) {
-      return res.status(500).json({ error: "Internal server error" });
+      return failRequest(req, res, 500, "Internal server error");
     }
   }),
 );
