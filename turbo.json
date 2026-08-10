@@ -155,7 +155,8 @@
     "AXIOM_TOKEN",
     "AXIOM_DATASET",
     "KAN_BASE_URL",
-    "KAN_API_TOKEN"
+    "KAN_API_TOKEN",
+    "ATTACHMENT_MAX_BYTES"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",

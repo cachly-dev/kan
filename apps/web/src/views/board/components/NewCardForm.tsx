@@ -8,6 +8,7 @@ import { HiOutlinePaperClip } from "react-icons/hi";
 import {
   HiOutlineBarsArrowDown,
   HiOutlineBarsArrowUp,
+  HiOutlineVideoCamera,
   HiXMark,
 } from "react-icons/hi2";
 
@@ -26,8 +27,10 @@ import Toggle from "~/components/Toggle";
 import { useModalFormState } from "~/hooks/useModalFormState";
 import { useModal } from "~/providers/modal";
 import { usePopup } from "~/providers/popup";
+import { isScreenRecordingSupported, useRecorder } from "~/providers/recorder";
 import { useWorkspace } from "~/providers/workspace";
 import { api } from "~/utils/api";
+import { attachDraft } from "~/utils/chunkedUpload";
 import { formatMemberDisplayName, getAvatarUrl } from "~/utils/helpers";
 
 type NewCardFormInput = NewCardInput & {
@@ -96,6 +99,14 @@ export function NewCardForm({
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // cachly: recordings started from this form upload while they run and are
+  // bound to the card on save, so a long take does not delay creating it.
+  const recorder = useRecorder();
+  const [canRecord, setCanRecord] = useState(false);
+  useEffect(() => {
+    setCanRecord(isScreenRecordingSupported());
+  }, []);
 
   // saving form state whenever form values change
   useEffect(() => {
@@ -321,11 +332,49 @@ export function NewCardForm({
     }
 
     if (filesToUpload.length > 0) {
-      const failedCount = await uploadAttachments(newCard.publicId, filesToUpload);
+      const failedCount = await uploadAttachments(
+        newCard.publicId,
+        filesToUpload,
+      );
       if (failedCount > 0) {
         showPopup({
           header: t`Some attachments failed`,
           message: t`The card was created, but ${failedCount} of ${filesToUpload.length} attachments could not be uploaded.`,
+          icon: "error",
+        });
+      }
+      await utils.board.byId.invalidate(queryParams);
+    }
+
+    // cachly: recordings are already in storage — binding them is one small
+    // call each, so this stays fast even for a 20 minute take.
+    const draftsToAttach = recorder.takeDrafts();
+    if (draftsToAttach.length > 0) {
+      let failedRecordings = 0;
+      for (const draft of draftsToAttach) {
+        try {
+          await attachDraft(
+            newCard.publicId,
+            draft.key,
+            draft.originalFilename,
+            draft.contentType,
+          );
+          if (draft.posterKey && draft.posterFilename) {
+            await attachDraft(
+              newCard.publicId,
+              draft.posterKey,
+              draft.posterFilename,
+              "image/jpeg",
+            );
+          }
+        } catch {
+          failedRecordings++;
+        }
+      }
+      if (failedRecordings > 0) {
+        showPopup({
+          header: t`Some recordings failed`,
+          message: t`The card was created, but ${failedRecordings} of ${draftsToAttach.length} recordings could not be attached.`,
           icon: "error",
         });
       }
@@ -624,7 +673,41 @@ export function NewCardForm({
           >
             <HiOutlinePaperClip size={14} />
           </button>
+          {canRecord && (
+            <button
+              type="button"
+              disabled={recorder.status !== "idle"}
+              onClick={() => void recorder.start({ boardPublicId })}
+              aria-label={t`Record screen`}
+              title={t`Record screen`}
+              className="flex h-auto items-center rounded-[5px] border-[1px] border-light-600 bg-light-200 px-1.5 py-1 text-left text-xs text-light-800 hover:bg-light-300 focus-visible:outline-none disabled:opacity-50 dark:border-dark-600 dark:bg-dark-400 dark:text-dark-1000 dark:hover:bg-dark-500"
+            >
+              <HiOutlineVideoCamera size={14} />
+            </button>
+          )}
         </div>
+        {recorder.drafts.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {recorder.drafts.map((draft) => (
+              <span
+                key={draft.key}
+                className="flex items-center gap-1 rounded-[5px] border-[1px] border-light-600 bg-light-200 px-2 py-1 text-xs text-light-800 dark:border-dark-600 dark:bg-dark-400 dark:text-dark-1000"
+              >
+                <HiOutlineVideoCamera size={12} />
+                <span className="max-w-[180px] truncate">
+                  {draft.originalFilename}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => recorder.removeDraft(draft.key)}
+                  aria-label={t`Remove recording`}
+                >
+                  <HiXMark size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {pendingFiles.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
             {pendingFiles.map((file, index) => (

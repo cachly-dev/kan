@@ -15,6 +15,9 @@ export const env = createEnv({
    */
   server: {
     KAN_ADMIN_API_KEY: z.string().optional(),
+    // cachly: ceiling for chunked uploads (screen recordings). Defaults to 1GB
+    // in the upload endpoints when unset.
+    ATTACHMENT_MAX_BYTES: z.coerce.number().int().positive().optional(),
     BETTER_AUTH_SECRET: z.string(),
     BETTER_AUTH_TRUSTED_ORIGINS: z
       .string()
