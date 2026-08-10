@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { Dialog, Transition } from "@headlessui/react";
 import { t } from "@lingui/core/macro";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   HiArrowDownTray,
   HiChevronLeft,
@@ -35,11 +35,6 @@ export function AttachmentThumbnails({
 }) {
   const { showPopup } = usePopup();
   const utils = api.useUtils();
-  const imageAttachments =
-    attachments?.filter(
-      (attachment) =>
-        attachment.contentType.startsWith("image/") && attachment.url,
-    ) ?? [];
 
   const mediaAttachments =
     attachments?.filter(
@@ -47,6 +42,31 @@ export function AttachmentThumbnails({
         (attachment.contentType.startsWith("video/") ||
           attachment.contentType.startsWith("audio/")) &&
         attachment.url,
+    ) ?? [];
+
+  // cachly: a recording uploads its first frame as "<video name>.jpg". That
+  // image is the video's poster, not a picture someone attached, so it is
+  // pulled out of the gallery and handed to the player instead.
+  const posterNames = new Set(
+    mediaAttachments.map(
+      (attachment) => `${attachment.originalFilename ?? ""}.jpg`,
+    ),
+  );
+
+  const posterFor = (attachment: Attachment) =>
+    attachments?.find(
+      (candidate) =>
+        candidate.contentType.startsWith("image/") &&
+        candidate.originalFilename ===
+          `${attachment.originalFilename ?? ""}.jpg`,
+    )?.url ?? undefined;
+
+  const imageAttachments =
+    attachments?.filter(
+      (attachment) =>
+        attachment.contentType.startsWith("image/") &&
+        attachment.url &&
+        !posterNames.has(attachment.originalFilename ?? ""),
     ) ?? [];
 
   const nonImageAttachments =
@@ -202,6 +222,7 @@ export function AttachmentThumbnails({
               <MediaPlayerItem
                 key={attachment.publicId}
                 attachment={attachment}
+                posterUrl={posterFor(attachment)}
                 onDownload={() => handleDownload(attachment)}
                 onDelete={
                   isReadOnly
@@ -443,13 +464,32 @@ function AttachmentThumbnail({
 
 function MediaPlayerItem({
   attachment,
+  posterUrl,
   onDownload,
   onDelete,
 }: {
   attachment: Attachment;
+  posterUrl?: string;
   onDownload: () => void;
   onDelete?: () => void;
 }) {
+  const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
+
+  // cachly: transcript comments carry timestamps. Clicking one asks every
+  // player on the card to jump; the one that owns the media answers.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ seconds: number }>).detail;
+      const element = mediaRef.current;
+      if (!element || !Number.isFinite(detail.seconds)) return;
+      element.currentTime = detail.seconds;
+      void element.play().catch(() => undefined);
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    window.addEventListener("kan:seek-media", handler);
+    return () => window.removeEventListener("kan:seek-media", handler);
+  }, []);
+
   if (!attachment.url) return null;
   const isVideo = attachment.contentType.startsWith("video/");
 
@@ -493,13 +533,21 @@ function MediaPlayerItem({
       </div>
       {isVideo ? (
         <video
+          ref={mediaRef as React.RefObject<HTMLVideoElement>}
           controls
           preload="metadata"
+          poster={posterUrl}
           src={attachment.url}
           className="max-h-72 w-full rounded-md bg-black"
         />
       ) : (
-        <audio controls preload="metadata" src={attachment.url} className="w-full" />
+        <audio
+          ref={mediaRef as React.RefObject<HTMLAudioElement>}
+          controls
+          preload="metadata"
+          src={attachment.url}
+          className="w-full"
+        />
       )}
     </div>
   );
