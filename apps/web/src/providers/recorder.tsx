@@ -39,6 +39,12 @@ export interface RecorderTarget {
   boardPublicId?: string;
 }
 
+/**
+ * A screen take needs a desktop browser; a voice note works on a phone. Same
+ * pipeline, same transcription — only the sources differ.
+ */
+export type RecorderMode = "screen" | "voice";
+
 export interface DraftRecording {
   key: string;
   originalFilename: string;
@@ -50,6 +56,7 @@ export interface DraftRecording {
 
 interface RecorderContextValue {
   status: RecorderStatus;
+  mode: RecorderMode;
   elapsedSeconds: number;
   uploadedBytes: number;
   cameraEnabled: boolean;
@@ -58,7 +65,7 @@ interface RecorderContextValue {
   cameraStream: MediaStream | null;
   drafts: DraftRecording[];
   isRecording: boolean;
-  start: (target: RecorderTarget) => Promise<void>;
+  start: (target: RecorderTarget, mode?: RecorderMode) => Promise<void>;
   stop: () => void;
   cancel: () => void;
   togglePause: () => void;
@@ -76,6 +83,14 @@ const MIME_CANDIDATES = [
   "video/webm",
 ];
 
+// Safari on iOS only produces mp4 here, so the fallbacks matter.
+const AUDIO_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/ogg;codecs=opus",
+];
+
 const CAMERA_PREFERENCE_KEY = "kan:recorder:camera";
 const BUBBLE_DIAMETER_RATIO = 0.18; // of the shorter video edge
 const CHUNK_MS = 2000;
@@ -85,12 +100,21 @@ const readCameraPreference = () => {
   return window.localStorage.getItem(CAMERA_PREFERENCE_KEY) !== "off";
 };
 
-const timestampName = () => {
+const extensionFor = (mimeType: string) => {
+  if (mimeType.startsWith("audio/mp4")) return "m4a";
+  if (mimeType.startsWith("audio/ogg")) return "ogg";
+  if (mimeType.startsWith("audio/")) return "webm";
+  return "webm";
+};
+
+const timestampName = (mode: RecorderMode, mimeType: string) => {
   const now = new Date();
   const pad = (value: number) => value.toString().padStart(2, "0");
-  return `aufnahme-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(
     now.getDate(),
-  )}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.webm`;
+  )}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const prefix = mode === "voice" ? "sprachnotiz" : "aufnahme";
+  return `${prefix}-${stamp}.${extensionFor(mimeType)}`;
 };
 
 export function RecorderProvider({ children }: { children: ReactNode }) {
@@ -98,6 +122,7 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
   const utils = api.useUtils();
 
   const [status, setStatus] = useState<RecorderStatus>("idle");
+  const [mode, setMode] = useState<RecorderMode>("screen");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [uploadedBytes, setUploadedBytes] = useState(0);
   const [cameraEnabled, setCameraEnabled] = useState(true);
@@ -359,23 +384,26 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
   );
 
   const start = useCallback(
-    async (target: RecorderTarget) => {
+    async (target: RecorderTarget, nextMode: RecorderMode = "screen") => {
       if (status !== "idle") return;
       setStatus("preparing");
+      setMode(nextMode);
       cancelledRef.current = false;
 
-      let display: MediaStream;
-      try {
-        display = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true,
-        });
-      } catch {
-        // Picker dismissed — not an error worth a popup.
-        setStatus("idle");
-        return;
+      let display: MediaStream | null = null;
+      if (nextMode === "screen") {
+        try {
+          display = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true,
+          });
+        } catch {
+          // Picker dismissed — not an error worth a popup.
+          setStatus("idle");
+          return;
+        }
+        streamsRef.current.push(display);
       }
-      streamsRef.current.push(display);
 
       let microphone: MediaStream | null = null;
       let camera: MediaStream | null = null;
@@ -385,9 +413,20 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
         streamsRef.current.push(microphone);
       } catch {
         microphone = null;
+        // Without a screen there is nothing left to record.
+        if (nextMode === "voice") {
+          showPopup({
+            header: t`No microphone`,
+            message: t`Without microphone access there is nothing to record.`,
+            icon: "error",
+          });
+          releaseHardware();
+          setStatus("idle");
+          return;
+        }
       }
 
-      if (readCameraPreference()) {
+      if (nextMode === "screen" && readCameraPreference()) {
         try {
           camera = await navigator.mediaDevices.getUserMedia({
             video: { width: 640, height: 480 },
@@ -400,13 +439,13 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const composite = buildCompositeStream(display, camera);
+      const composite = display ? buildCompositeStream(display, camera) : null;
       const videoTracks = composite
         ? composite.getVideoTracks()
-        : display.getVideoTracks();
+        : (display?.getVideoTracks() ?? []);
 
       const audioTracks = [
-        ...display.getAudioTracks(),
+        ...(display?.getAudioTracks() ?? []),
         ...(microphone?.getAudioTracks() ?? []),
       ];
       const tracks: MediaStreamTrack[] = [...videoTracks];
@@ -427,7 +466,9 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
         tracks.push(...destination.stream.getAudioTracks());
       }
 
-      const mimeType = MIME_CANDIDATES.find((candidate) =>
+      const candidates =
+        nextMode === "voice" ? AUDIO_MIME_CANDIDATES : MIME_CANDIDATES;
+      const mimeType = candidates.find((candidate) =>
         MediaRecorder.isTypeSupported(candidate),
       );
       const recorder = new MediaRecorder(
@@ -435,7 +476,11 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
         mimeType ? { mimeType } : undefined,
       );
 
-      const filename = timestampName();
+      const fallbackType = nextMode === "voice" ? "audio/webm" : "video/webm";
+      const filename = timestampName(
+        nextMode,
+        recorder.mimeType || fallbackType,
+      );
       filenameRef.current = filename;
       targetRef.current = target;
       const upload = new ChunkedUpload(
@@ -444,7 +489,7 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
           boardPublicId: target.boardPublicId,
         },
         filename,
-        recorder.mimeType || "video/webm",
+        recorder.mimeType || fallbackType,
       );
       uploadRef.current = upload;
 
@@ -459,7 +504,7 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
       recorderRef.current = recorder;
 
       // The browser's own "stop sharing" button must end the take cleanly.
-      display.getVideoTracks()[0]?.addEventListener("ended", () => {
+      display?.getVideoTracks()[0]?.addEventListener("ended", () => {
         if (recorderRef.current && recorderRef.current.state !== "inactive") {
           recorderRef.current.stop();
         }
@@ -473,10 +518,19 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
         setElapsedSeconds((seconds) => seconds + 1);
       }, 1000);
 
-      // Give the sources a moment to paint before grabbing the poster frame.
-      window.setTimeout(capturePoster, 1500);
+      if (nextMode === "screen") {
+        // Give the sources a moment to paint before grabbing the poster frame.
+        window.setTimeout(capturePoster, 1500);
+      }
     },
-    [buildCompositeStream, capturePoster, finalise, status],
+    [
+      buildCompositeStream,
+      capturePoster,
+      finalise,
+      releaseHardware,
+      showPopup,
+      status,
+    ],
   );
 
   const stop = useCallback(() => {
@@ -566,6 +620,7 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
   const value = useMemo<RecorderContextValue>(
     () => ({
       status,
+      mode,
       elapsedSeconds,
       uploadedBytes,
       cameraEnabled,
@@ -591,6 +646,7 @@ export function RecorderProvider({ children }: { children: ReactNode }) {
       cancel,
       drafts,
       elapsedSeconds,
+      mode,
       removeDraft,
       start,
       status,
@@ -618,7 +674,15 @@ export const useRecorder = () => {
 };
 
 export const isScreenRecordingSupported = () =>
+  isVoiceRecordingSupported() &&
+  "getDisplayMedia" in navigator.mediaDevices;
+
+/**
+ * Phones can do this even though they cannot record a screen — which is the
+ * whole point of the voice note.
+ */
+export const isVoiceRecordingSupported = () =>
   typeof navigator !== "undefined" &&
   typeof navigator.mediaDevices !== "undefined" &&
-  "getDisplayMedia" in navigator.mediaDevices &&
+  "getUserMedia" in navigator.mediaDevices &&
   typeof MediaRecorder !== "undefined";

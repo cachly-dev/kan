@@ -1,6 +1,7 @@
 import { t } from "@lingui/core/macro";
 import { useCallback, useEffect, useRef } from "react";
 import {
+  HiOutlineMicrophone,
   HiOutlinePause,
   HiOutlinePlay,
   HiOutlineStopCircle,
@@ -35,6 +36,7 @@ const formatBytes = (bytes: number) => {
 export function RecordingOverlay() {
   const {
     status,
+    mode,
     elapsedSeconds,
     uploadedBytes,
     cameraEnabled,
@@ -100,11 +102,14 @@ export function RecordingOverlay() {
   const isPaused = status === "paused";
   const isFinishing = status === "finishing";
   const isPreparing = status === "preparing";
+  const isVoice = mode === "voice";
   const bubbleSize = `min(${BUBBLE_RATIO * 100}vw, ${BUBBLE_RATIO * 100}vh)`;
 
   return (
     <>
-      {!isPreparing && (
+      {/* A voice note does not capture the screen, so framing the whole
+          viewport in red would say something untrue. */}
+      {!isPreparing && !isVoice && (
         <div
           aria-hidden
           className={`pointer-events-none fixed inset-0 z-[90] border-4 ${
@@ -118,7 +123,7 @@ export function RecordingOverlay() {
         />
       )}
 
-      {cameraAvailable && cameraEnabled && !isFinishing && (
+      {!isVoice && cameraAvailable && cameraEnabled && !isFinishing && (
         <div
           ref={bubbleRef}
           onPointerDown={handlePointerDown}
@@ -155,6 +160,9 @@ export function RecordingOverlay() {
                     : "animate-pulse bg-red-500"
               }`}
             />
+            {isVoice && !isPreparing && !isFinishing && (
+              <HiOutlineMicrophone className="h-4 w-4" />
+            )}
             {isPreparing
               ? t`Starting…`
               : isFinishing
@@ -168,7 +176,7 @@ export function RecordingOverlay() {
                 {formatBytes(uploadedBytes)} {t`secured`}
               </span>
 
-              {cameraAvailable && (
+              {!isVoice && cameraAvailable && (
                 <button
                   type="button"
                   onClick={toggleCamera}

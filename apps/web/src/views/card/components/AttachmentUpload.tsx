@@ -11,6 +11,7 @@ import { usePopup } from "~/providers/popup";
 import { api } from "~/utils/api";
 import { invalidateCard } from "~/utils/cardInvalidation";
 import { ScreenRecorder } from "./ScreenRecorder";
+import { VoiceRecorder } from "./VoiceRecorder";
 
 export function AttachmentUpload({ cardPublicId }: { cardPublicId: string }) {
   const { openModal } = useModal();
@@ -130,6 +131,7 @@ export function AttachmentUpload({ cardPublicId }: { cardPublicId: string }) {
             onClick={() => openModal("ADD_CHECKLIST")}
           />
           <div className="flex items-center gap-1">
+            <VoiceRecorder cardPublicId={cardPublicId} />
             <ScreenRecorder cardPublicId={cardPublicId} />
             <Button
               type="button"

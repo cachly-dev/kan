@@ -8,6 +8,7 @@ import { HiOutlinePaperClip } from "react-icons/hi";
 import {
   HiOutlineBarsArrowDown,
   HiOutlineBarsArrowUp,
+  HiOutlineMicrophone,
   HiOutlineVideoCamera,
   HiXMark,
 } from "react-icons/hi2";
@@ -27,7 +28,11 @@ import Toggle from "~/components/Toggle";
 import { useModalFormState } from "~/hooks/useModalFormState";
 import { useModal } from "~/providers/modal";
 import { usePopup } from "~/providers/popup";
-import { isScreenRecordingSupported, useRecorder } from "~/providers/recorder";
+import {
+  isScreenRecordingSupported,
+  isVoiceRecordingSupported,
+  useRecorder,
+} from "~/providers/recorder";
 import { useWorkspace } from "~/providers/workspace";
 import { api } from "~/utils/api";
 import { attachDraft } from "~/utils/chunkedUpload";
@@ -104,8 +109,11 @@ export function NewCardForm({
   // bound to the card on save, so a long take does not delay creating it.
   const recorder = useRecorder();
   const [canRecord, setCanRecord] = useState(false);
+  const [canSpeak, setCanSpeak] = useState(false);
   useEffect(() => {
     setCanRecord(isScreenRecordingSupported());
+    // Phones have no screen capture but every phone has a microphone.
+    setCanSpeak(isVoiceRecordingSupported());
   }, []);
 
   // saving form state whenever form values change
@@ -675,6 +683,18 @@ export function NewCardForm({
           >
             <HiOutlinePaperClip size={14} />
           </button>
+          {canSpeak && (
+            <button
+              type="button"
+              disabled={recorder.status !== "idle"}
+              onClick={() => void recorder.start({ boardPublicId }, "voice")}
+              aria-label={t`Record voice note`}
+              title={t`Record voice note`}
+              className="flex h-auto items-center rounded-[5px] border-[1px] border-light-600 bg-light-200 px-1.5 py-1 text-left text-xs text-light-800 hover:bg-light-300 focus-visible:outline-none disabled:opacity-50 dark:border-dark-600 dark:bg-dark-400 dark:text-dark-1000 dark:hover:bg-dark-500"
+            >
+              <HiOutlineMicrophone size={14} />
+            </button>
+          )}
           {canRecord && (
             <button
               type="button"
