@@ -30,6 +30,11 @@ jobs:
   checks:
     name: Typecheck
     runs-on: [self-hosted, apps]
+    # Ohne Angabe gilt die GitHub-Voreinstellung von 6 Stunden. Auf dem
+    # geteilten self-hosted Node blockiert ein haengender Lauf damit einen
+    # halben Tag den Runner-Platz, und in der Oberflaeche steht nur "laeuft" —
+    # genau das Bild des Zombie-Jobs vom 26.07.2026 bei stayledger.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       # Keine explizite Version: package.json packageManager (pnpm@9.14.2)
@@ -53,6 +58,10 @@ jobs:
     # Ein Pull Request darf pruefen, aber niemals ausliefern.
     if: github.event_name != 'pull_request'
     runs-on: [self-hosted, apps]
+    # Ein Image bauen, pushen, ausrollen, Rauchtest. 45 Minuten sind reichlich;
+    # sie kappen nur den Fall, in dem der Lauf gar nicht mehr weiterkommt
+    # (volle Platte, haengendes ssh, wartender docker push).
+    timeout-minutes: 45
     env:
       REGISTRY: registry.cachly.dev
       SSH_OPTS: -i /tmp/deploy_key_kan -p 2222 -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10
@@ -100,6 +109,51 @@ jobs:
         run: |
           curl -sf --retry 5 --retry-delay 5 --max-time 15 https://kan.cachly.dev/api/health >/dev/null
           echo "deployed & healthy"
+
+      # Meldeweg bei rotem Deploy. Laeuft bei Erfolg UND Misserfolg
+      # (if: always()); Vorbild ist kanzlei-kompass/.github/workflows/deploy.yml.
+      #
+      # Ein Unterschied zum Vorbild ist Absicht: dort setzt der Schritt still
+      # aus, wenn die Secrets fehlen ("skipping", exit 0). Ein Meldeweg, der
+      # unbemerkt nichts tut, ist schlimmer als gar keiner — man verlaesst sich
+      # darauf. Fehlen die Secrets, schreibt der Schritt hier deshalb eine
+      # sichtbare Meldung in den Lauf: bei rotem Deploy als ::error::, bei
+      # gruenem als ::warning::. Rot faerben tut er den Lauf nie.
+      #
+      # Noetige Repo-Secrets (am 11.08.2026 in diesem Repo BEIDE nicht gesetzt,
+      # geprueft mit `gh secret list -R cachly-dev/kan`):
+      #   TELEGRAM_BOT_TOKEN  — Bot-Token
+      #   TELEGRAM_CHAT_ID    — Chat-Id der Ops-Gruppe (negative Zahl)
+      - name: Telegram-Meldung (Deploy-Ergebnis)
+        if: always()
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          SHA_SHORT=$(echo "$GITHUB_SHA" | cut -c1-7)
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "$JOB_STATUS" = "success" ]; then
+            MSG="Kan ausgerollt — ${SHA_SHORT} laeuft auf kan.cachly.dev"
+          else
+            MSG="Kan Deploy ROT (${JOB_STATUS}) — ${SHA_SHORT}. Lauf: ${RUN_URL}"
+          fi
+          if [ -z "$TG_TOKEN" ] || [ -z "$TG_CHAT" ]; then
+            if [ "$JOB_STATUS" = "success" ]; then
+              echo "::warning::Meldeweg inaktiv — TELEGRAM_BOT_TOKEN und/oder TELEGRAM_CHAT_ID fehlen als Repo-Secret. Bei einem roten Deploy wuerde niemand benachrichtigt."
+            else
+              echo "::error::Deploy ist rot UND der Meldeweg ist inaktiv (TELEGRAM_BOT_TOKEN und/oder TELEGRAM_CHAT_ID fehlen als Repo-Secret). Niemand wurde benachrichtigt. Text waere gewesen: ${MSG}"
+            fi
+            exit 0
+          fi
+          if curl -sS -f --max-time 10 \
+               "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+               --data-urlencode "chat_id=${TG_CHAT}" \
+               --data-urlencode "text=${MSG}" >/dev/null; then
+            echo "Telegram-Meldung zugestellt (${JOB_STATUS})."
+          else
+            echo "::error::Telegram-Meldung konnte NICHT zugestellt werden (${JOB_STATUS}). Text waere gewesen: ${MSG}"
+          fi
 
       # sha-Tags lokal enttaggen (Registry behaelt sie, Rollback unberuehrt),
       # sonst frisst jeder Lauf ~2 GB auf dem geteilten CI-Node.
