@@ -143,6 +143,19 @@ export default function SideNavigation({
       },
     },
     {
+      // cachly: Mothership-Cortex (Wissens-Netz) direkt im Board
+      name: t`Cortex`,
+      href: "/cortex",
+      icon: isDarkMode ? templatesIconDark : templatesIconLight,
+      keyboardShortcut: {
+        type: "SEQUENCE",
+        strokes: [{ key: "G" }, { key: "C" }],
+        action: () => router.push("/cortex"),
+        group: "NAVIGATION",
+        description: t`Go to cortex`,
+      },
+    },
+    {
       name: t`Settings`,
       href: "/settings",
       icon: isDarkMode ? settingsIconDark : settingsIconLight,
