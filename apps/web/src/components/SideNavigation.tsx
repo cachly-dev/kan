@@ -156,6 +156,19 @@ export default function SideNavigation({
       },
     },
     {
+      // cachly: Glaeserne Fabrik (Beweisbetrieb) direkt im Board
+      name: t`Fabrik`,
+      href: "/fabrik",
+      icon: isDarkMode ? templatesIconDark : templatesIconLight,
+      keyboardShortcut: {
+        type: "SEQUENCE",
+        strokes: [{ key: "G" }, { key: "F" }],
+        action: () => router.push("/fabrik"),
+        group: "NAVIGATION",
+        description: t`Go to fabrik`,
+      },
+    },
+    {
       name: t`Settings`,
       href: "/settings",
       icon: isDarkMode ? settingsIconDark : settingsIconLight,

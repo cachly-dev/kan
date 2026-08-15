@@ -27,6 +27,7 @@ const ALLOWED: Record<string, string> = {
   wissen: "/wissen",
   "wissen/data": "/wissen/data",
   "wissen/graph": "/wissen/graph",
+  fabrik: "/fabrik",
 };
 
 export default withRateLimit(
