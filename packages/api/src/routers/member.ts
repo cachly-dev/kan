@@ -45,6 +45,7 @@ export const memberRouter = createTRPCRouter({
     .output(memberInviteResponseSchema)
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.user?.id;
+      const email = input.email.trim().toLowerCase();
 
       if (!userId)
         throw new TRPCError({
@@ -66,12 +67,12 @@ export const memberRouter = createTRPCRouter({
       await assertPermission(ctx.db, userId, workspace.id, "member:invite");
 
       const isInvitedEmailAlreadyMember = workspace.members.some(
-        (member) => member.email === input.email,
+        (member) => member.email?.toLowerCase() === email,
       );
 
       if (isInvitedEmailAlreadyMember) {
         throw new TRPCError({
-          message: `User with email ${input.email} is already a member of this workspace`,
+          message: `User with email ${email} is already a member of this workspace`,
           code: "CONFLICT",
         });
       }
@@ -131,7 +132,7 @@ export const memberRouter = createTRPCRouter({
         }
       }
 
-      const existingUser = await userRepo.getByEmail(ctx.db, input.email);
+      const existingUser = await userRepo.getByEmail(ctx.db, email);
 
       // Get the workspace role to set roleId
       const memberRole = await permissionRepo.getRoleByWorkspaceIdAndName(
@@ -142,7 +143,7 @@ export const memberRouter = createTRPCRouter({
 
       const invite = await memberRepo.create(ctx.db, {
         workspaceId: workspace.id,
-        email: input.email,
+        email,
         userId: existingUser?.id ?? null,
         createdBy: userId,
         role: "member",
@@ -152,18 +153,18 @@ export const memberRouter = createTRPCRouter({
 
       if (!invite)
         throw new TRPCError({
-          message: `Unable to invite user with email ${input.email}`,
+          message: `Unable to invite user with email ${email}`,
           code: "INTERNAL_SERVER_ERROR",
         });
 
       const { status } = await ctx.auth.api.signInMagicLink({
-        email: input.email,
+        email,
         callbackURL: `/boards?type=invite&memberPublicId=${invite.publicId}`,
       });
 
       if (!status) {
         console.error("Failed to send magic link invitation:", {
-          email: input.email,
+          email,
           callbackURL: `/boards?type=invite&memberPublicId=${invite.publicId}`,
         });
 
@@ -174,7 +175,7 @@ export const memberRouter = createTRPCRouter({
         });
 
         throw new TRPCError({
-          message: `Failed to send magic link invitation to user with email ${input.email}.`,
+          message: `Failed to send magic link invitation to user with email ${email}.`,
           code: "INTERNAL_SERVER_ERROR",
         });
       }

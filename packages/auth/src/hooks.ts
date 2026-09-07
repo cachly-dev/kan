@@ -30,10 +30,13 @@ export function createDatabaseHooks(db: dbClient) {
     user: {
       create: {
         async before(user: BetterAuthUser, _context: unknown) {
+          // Email addresses are compared case-insensitively everywhere: the
+          // invitation may have been typed with capitals, the login without.
+          const email = user.email.trim().toLowerCase();
           if (env("NEXT_PUBLIC_DISABLE_SIGN_UP")?.toLowerCase() === "true") {
             const pendingInvitation = await memberRepo.getByEmailAndStatus(
               db,
-              user.email,
+              email,
               "invited",
             );
 
@@ -48,7 +51,7 @@ export function createDatabaseHooks(db: dbClient) {
             .map((d) => d.trim().toLowerCase())
             .filter(Boolean);
           if (allowed && allowed.length > 0) {
-            const domain = user.email.split("@")[1]?.toLowerCase();
+            const domain = email.split("@")[1];
             if (!domain || !allowed.includes(domain)) {
               return Promise.resolve(false);
             }
@@ -150,6 +153,18 @@ export function createDatabaseHooks(db: dbClient) {
 
 export function createMiddlewareHooks(db: dbClient) {
   return {
+    // Normalise the email on every auth request (magic link, credentials,
+    // sign-up) before better-auth looks the user up: "V.Diel@gmx.de" and
+    // "v.diel@gmx.de" are the same mailbox and must be the same account.
+    before: createAuthMiddleware(async (ctx) => {
+      const body = ctx.body as Record<string, unknown> | undefined;
+      if (body && typeof body.email === "string") {
+        const email = body.email.trim().toLowerCase();
+        if (email !== body.email) {
+          return { context: { ...ctx, body: { ...body, email } } };
+        }
+      }
+    }),
     after: createAuthMiddleware(async (ctx) => {
       if (
         ctx.path === "/magic-link/verify" &&

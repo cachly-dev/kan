@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNotNull } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 
 import type { dbClient } from "@kan/db/client";
@@ -84,7 +84,7 @@ export const getByEmail = (db: dbClient, email: string) => {
       name: true,
       email: true,
     },
-    where: eq(users.email, email),
+    where: sql`lower(${users.email}) = ${email.trim().toLowerCase()}`,
   });
 };
 

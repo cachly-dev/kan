@@ -110,6 +110,28 @@ describe("createDatabaseHooks", () => {
       );
     });
 
+    it("matches the invitation regardless of how the email was capitalised", async () => {
+      mockEnv.mockImplementation((key: string) =>
+        key === "NEXT_PUBLIC_DISABLE_SIGN_UP" ? "true" : undefined,
+      );
+      mockGetByEmailAndStatus.mockResolvedValue({
+        id: "member-1",
+        email: "v.diel89@gmx.de",
+        status: "invited",
+      });
+
+      const result = await hooks.user.create.before(
+        { ...fakeUser, email: " V.Diel89@GMX.de " },
+        {},
+      );
+      expect(result).toBe(true);
+      expect(mockGetByEmailAndStatus).toHaveBeenCalledWith(
+        db,
+        "v.diel89@gmx.de",
+        "invited",
+      );
+    });
+
     it("blocks sign-up when disabled and invitation exists but domain is not allowed", async () => {
       mockEnv.mockImplementation((key: string) =>
         key === "NEXT_PUBLIC_DISABLE_SIGN_UP" ? "true" : undefined,
