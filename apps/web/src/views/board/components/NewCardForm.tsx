@@ -35,7 +35,11 @@ import {
 } from "~/providers/recorder";
 import { useWorkspace } from "~/providers/workspace";
 import { api } from "~/utils/api";
-import { attachDraft } from "~/utils/chunkedUpload";
+import {
+  attachDraft,
+  SINGLE_SHOT_MAX_BYTES,
+  uploadFileInParts,
+} from "~/utils/chunkedUpload";
 import { formatMemberDisplayName, getAvatarUrl } from "~/utils/helpers";
 
 type NewCardFormInput = NewCardInput & {
@@ -300,6 +304,11 @@ export function NewCardForm({
 
     for (const file of files) {
       try {
+        if (file.size > SINGLE_SHOT_MAX_BYTES) {
+          // cachly: large files travel in parts, see chunkedUpload.ts.
+          await uploadFileInParts(cardPublicId, file);
+          continue;
+        }
         const response = await fetch(
           `${baseUrl}/api/upload/attachment?cardPublicId=${encodeURIComponent(cardPublicId)}`,
           {

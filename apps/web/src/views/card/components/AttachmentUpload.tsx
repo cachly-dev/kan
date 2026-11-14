@@ -10,6 +10,10 @@ import { useModal } from "~/providers/modal";
 import { usePopup } from "~/providers/popup";
 import { api } from "~/utils/api";
 import { invalidateCard } from "~/utils/cardInvalidation";
+import {
+  SINGLE_SHOT_MAX_BYTES,
+  uploadFileInParts,
+} from "~/utils/chunkedUpload";
 import { ScreenRecorder } from "./ScreenRecorder";
 import { VoiceRecorder } from "./VoiceRecorder";
 
@@ -25,21 +29,26 @@ export function AttachmentUpload({ cardPublicId }: { cardPublicId: string }) {
     setUploading(true);
 
     try {
-      const baseUrl = env("NEXT_PUBLIC_BASE_URL") ?? "";
-      const response = await fetch(
-        `${baseUrl}/api/upload/attachment?cardPublicId=${encodeURIComponent(cardPublicId)}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": file.type,
-            "x-original-filename": encodeURIComponent(file.name),
+      if (file.size > SINGLE_SHOT_MAX_BYTES) {
+        // cachly: large files travel in parts, see chunkedUpload.ts.
+        await uploadFileInParts(cardPublicId, file);
+      } else {
+        const baseUrl = env("NEXT_PUBLIC_BASE_URL") ?? "";
+        const response = await fetch(
+          `${baseUrl}/api/upload/attachment?cardPublicId=${encodeURIComponent(cardPublicId)}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": file.type,
+              "x-original-filename": encodeURIComponent(file.name),
+            },
+            body: file,
           },
-          body: file,
-        },
-      );
+        );
 
-      if (!response.ok) {
-        throw new Error("Upload failed");
+        if (!response.ok) {
+          throw new Error("Upload failed");
+        }
       }
 
       await invalidateCard(utils, cardPublicId);

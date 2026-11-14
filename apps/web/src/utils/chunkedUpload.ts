@@ -59,6 +59,9 @@ export class ChunkedUpload {
     private readonly target: UploadTargetRef,
     private readonly filename: string,
     private readonly contentType: string,
+    // Known only for finished files; lets the server refuse an oversized
+    // file before the first byte travels. Recordings leave it out.
+    private readonly expectedSize?: number,
   ) {}
 
   get uploadedBytes() {
@@ -97,6 +100,7 @@ export class ChunkedUpload {
       body: JSON.stringify({
         filename: this.filename,
         contentType: this.contentType,
+        size: this.expectedSize,
         ...this.target,
       }),
     });
@@ -139,6 +143,12 @@ export class ChunkedUpload {
       }
     }
     throw lastError;
+  }
+
+  /** Waits until every queued part is stored; throws if one of them failed. */
+  async drain() {
+    await this.queue;
+    if (this.failed) throw new Error("part upload failed");
   }
 
   /** Waits for queued parts, uploads the tail and seals the object. */
@@ -184,6 +194,45 @@ export class ChunkedUpload {
     }
   }
 }
+
+/**
+ * cachly: Files above this size skip the single-shot /api/upload/attachment
+ * endpoint. That endpoint caps at 50MB, and Cloudflare in front of
+ * kan.cachly.dev drops every request body above 100MiB. Parts pass both.
+ */
+export const SINGLE_SHOT_MAX_BYTES = 32 * 1024 * 1024;
+
+// 12MB keeps a 1GB file at 86 parts (rate limit: 600 parts per minute) and
+// stays below the 16MB the part endpoint accepts.
+const FILE_PART_SIZE = 12 * 1024 * 1024;
+
+/**
+ * cachly: Uploads a picked or dropped file in parts and attaches it to the
+ * card. Each part is stored before the next slice is read, so memory holds
+ * one part, whatever the file size. A failed part aborts the whole upload:
+ * an object with a gap must never become an attachment.
+ */
+export const uploadFileInParts = async (
+  cardPublicId: string,
+  file: File,
+): Promise<FinishResult> => {
+  const upload = new ChunkedUpload(
+    { cardPublicId },
+    file.name,
+    file.type || "application/octet-stream",
+    file.size,
+  );
+  try {
+    for (let offset = 0; offset < file.size; offset += FILE_PART_SIZE) {
+      upload.add(file.slice(offset, offset + FILE_PART_SIZE));
+      await upload.drain();
+    }
+    return await upload.finish();
+  } catch (error) {
+    await upload.abort();
+    throw error;
+  }
+};
 
 /** Uploads a small file in one chunked round trip (used for poster frames). */
 export const uploadSmallFile = async (
