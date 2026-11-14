@@ -9,6 +9,7 @@ import {
   DRAFT_PREFIX,
   failRequest,
   getBucket,
+  MAX_TOTAL_BYTES,
   readJsonBody,
   resolveTarget,
   sanitizeFilename,
@@ -32,9 +33,16 @@ export default withRateLimit(
       const body = (await readJsonBody(req)) as {
         filename?: string;
         contentType?: string;
+        size?: number;
         cardPublicId?: string;
         boardPublicId?: string;
       };
+
+      // Finished files announce their size; refuse an oversized one here
+      // instead of after the last part (finish checks again either way).
+      if (body.size !== undefined && Number(body.size) > MAX_TOTAL_BYTES) {
+        return failRequest(req, res, 413, "Upload exceeds the size limit");
+      }
 
       const { target } = await resolveTarget(req, {
         cardPublicId: body.cardPublicId,
